@@ -1,0 +1,1740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Poker Studio</title>
+    <style>
+        /* =========================================================
+           1. BASE STYLES & SIZE VARIABLES
+           Card and seat sizes live in variables so the media
+           queries at the bottom can shrink everything for phones.
+           ========================================================= */
+        :root {
+            --card-w: 50px;
+            --card-h: 75px;
+            --card-font: 1.1rem;
+            --seat-w: 140px;
+            --felt: #27ae60;
+            --wood: #7e5109;
+            --panel: #34495e;
+            --accent: #e67e22;
+            --gold: #f1c40f;
+            --danger: #e74c3c;
+            --success: #2ecc71;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background-color: #2c3e50;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Header: title + settings */
+        header {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        h1 { margin: 0; font-size: 1.8rem; }
+
+        #settings {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        #settings label { display: flex; align-items: center; gap: 5px; }
+
+        #settings input, #settings select {
+            padding: 6px 8px;
+            border-radius: 5px;
+            border: none;
+            font-size: 0.9rem;
+        }
+        #player-name { width: 110px; }
+
+        /* =========================================================
+           2. THE TABLE
+           The table keeps its shape with aspect-ratio and scales to
+           the screen width. Seats are placed with percentages, so
+           they move with it.
+           ========================================================= */
+        #poker-table {
+            background-color: var(--felt);
+            border: 15px solid var(--wood);
+            border-radius: 150px;
+            width: 100%;
+            max-width: 900px;
+            aspect-ratio: 900 / 520;
+            position: relative;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.5), 0 10px 20px rgba(0,0,0,0.3);
+            margin-bottom: 16px;
+        }
+
+        #table-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 2;
+        }
+
+        #pot-display {
+            font-size: 1.2rem;
+            font-weight: bold;
+            background: rgba(0,0,0,0.6);
+            padding: 5px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+
+        #community-cards {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+            min-height: var(--card-h);
+        }
+
+        /* Empty state shown in the middle before the first deal */
+        .table-hint {
+            color: rgba(255,255,255,0.75);
+            font-style: italic;
+            border: 2px dashed rgba(255,255,255,0.35);
+            border-radius: 8px;
+            padding: 10px 16px;
+        }
+
+        /* Seats */
+        .player-seat {
+            position: absolute;
+            text-align: center;
+            width: var(--seat-w);
+            padding: 6px;
+            border-radius: 10px;
+            transform: translate(-50%, -50%); /* positioned by their center */
+            transition: background 0.2s, box-shadow 0.2s;
+            z-index: 1;
+        }
+
+        .player-seat.active {
+            background: rgba(255, 215, 0, 0.18);
+            box-shadow: 0 0 15px gold;
+        }
+
+        .player-seat.folded .card-container { opacity: 0.4; }
+
+        .player-seat.winner {
+            background: rgba(255, 215, 0, 0.3);
+            box-shadow: 0 0 25px 8px gold;
+        }
+
+        .seat-name {
+            font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chips { font-size: 0.95rem; color: var(--gold); margin-bottom: 4px; }
+
+        .bet { min-height: 1.2em; font-size: 0.9rem; margin-top: 4px; }
+
+        .dealer-btn {
+            display: inline-block;
+            background: white;
+            color: black;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            line-height: 20px;
+            font-size: 0.75rem;
+            margin-left: 4px;
+        }
+
+        /* "Thinking" dots: a loading state while a bot decides */
+        .thinking::after {
+            content: '';
+            animation: dots 1s steps(4) infinite;
+        }
+        @keyframes dots {
+            0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; }
+        }
+
+        .remove-bot {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            padding: 0 7px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            background-color: #c0392b;
+            border-radius: 50%;
+        }
+        .remove-bot:hover { background-color: #962d22; }
+
+        .card-container {
+            display: flex;
+            gap: 5px;
+            justify-content: center;
+            min-height: var(--card-h);
+            align-items: center;
+        }
+
+        /* Playing cards */
+        .card {
+            width: var(--card-w);
+            height: var(--card-h);
+            background-color: white;
+            color: black;
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 4px;
+            font-weight: bold;
+            font-size: var(--card-font);
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+        .card.red { color: #c0392b; }
+        .card-back { background-color: #2980b9; border: 2px solid white; color: transparent; }
+
+        /* Winner banner (middle of the table) */
+        /* Kept short and wide (text left, button right) so it doesn't
+           push the community cards down onto your seat */
+        #winner-banner {
+            display: none; /* switched to flex by showBanner() */
+            align-items: center;
+            gap: 16px;
+            background: rgba(0, 0, 0, 0.85);
+            border: 3px solid gold;
+            border-radius: 12px;
+            padding: 8px 16px;
+            margin: 0 auto 8px;
+            width: max-content;
+            max-width: 380px;
+            text-align: left;
+            animation: pop 0.35s ease-out;
+        }
+        #winner-title {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: gold;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.6);
+        }
+        #winner-detail { font-size: 0.9rem; line-height: 1.35; }
+        #winner-banner button { flex-shrink: 0; }
+
+        /* Full-table screen: game over / cleared the table */
+        #game-over {
+            display: none;
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 20;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            animation: fade 0.5s ease-out;
+        }
+        #game-over-title { font-size: 2.6rem; font-weight: bold; margin-bottom: 8px; }
+        #game-over.lost #game-over-title { color: #ff7675; }
+        #game-over.won #game-over-title  { color: gold; text-shadow: 0 0 15px rgba(255,215,0,0.6); }
+        #game-over-msg   { font-size: 1.1rem; margin-bottom: 6px; }
+        #game-over-stats { color: #b2bec3; margin-bottom: 18px; }
+
+        .bust-note { color: #ff7675; font-weight: bold; }
+
+        @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pop {
+            0%   { transform: scale(0.5); opacity: 0; }
+            80%  { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(1); }
+        }
+
+        /* =========================================================
+           3. ODDS PANEL + CONTROLS
+           ========================================================= */
+        #odds-panel {
+            width: 100%;
+            max-width: 900px;
+            background: rgba(0,0,0,0.25);
+            border-radius: 10px;
+            padding: 10px 16px;
+            margin-bottom: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 24px;
+            align-items: center;
+            justify-content: center;
+            min-height: 46px;
+            text-align: center;
+        }
+        .odds-big { font-size: 1.3rem; font-weight: bold; }
+        .odds-good { color: var(--success); }
+        .odds-bad  { color: #ff7675; }
+        .muted { color: #b2bec3; font-style: italic; }
+
+        /* Small spinner for loading states */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #controls {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: flex-start;
+            justify-content: center;
+            background: var(--panel);
+            padding: 14px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        button {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #d35400; }
+        button:disabled { background-color: #7f8c8d; cursor: not-allowed; }
+        button.secondary { background-color: #576574; }
+        button.secondary:hover { background-color: #3d4a57; }
+        button.danger-confirm { background-color: var(--danger); }
+
+        /* Raise box with an inline error message */
+        .raise-group { display: flex; flex-direction: column; gap: 4px; }
+        .raise-row { display: flex; gap: 6px; }
+        #raise-amount {
+            width: 90px;
+            padding: 8px;
+            font-size: 1rem;
+            border-radius: 5px;
+            border: 2px solid transparent;
+        }
+        #raise-amount.invalid { border-color: var(--danger); background: #fdecea; }
+        #raise-error {
+            color: #ff7675;
+            font-size: 0.85rem;
+            max-width: 220px;
+        }
+        #raise-error:empty { display: none; }
+
+        #status { margin: 12px 0 4px; font-weight: bold; color: #ecf0f1; text-align: center; }
+
+        /* =========================================================
+           4. STATS / CHART / LOG PANELS
+           Two columns on desktop, one column on smaller screens.
+           ========================================================= */
+        #panels {
+            width: 100%;
+            max-width: 900px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-top: 10px;
+        }
+
+        .panel {
+            background: rgba(0,0,0,0.25);
+            border-radius: 10px;
+            padding: 12px 15px;
+            min-width: 0; /* lets the chart shrink inside the grid */
+        }
+        .panel h2 {
+            margin: 0 0 10px;
+            font-size: 1.05rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel h2 label { font-size: 0.85rem; font-weight: normal; }
+
+        #stats-tiles {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .tile {
+            background: rgba(255,255,255,0.07);
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+        }
+        .tile-value { font-size: 1.15rem; font-weight: bold; color: var(--gold); }
+        .tile-label { font-size: 0.75rem; color: #b2bec3; }
+
+        #chart-box { position: relative; height: 220px; }
+        #chart-message {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            color: #b2bec3;
+            font-style: italic;
+            border: 2px dashed rgba(255,255,255,0.15);
+            border-radius: 8px;
+        }
+
+        #log {
+            max-height: 330px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            color: #dfe6e9;
+        }
+        #log div { padding: 2px 0; }
+        #log hr { border: none; border-top: 1px solid #576574; margin: 6px 0; }
+        .red-text { color: #ff7675; }
+
+        /* =========================================================
+           5. TOAST NOTIFICATIONS
+           ========================================================= */
+        #toasts {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 100;
+            max-width: 320px;
+        }
+        .toast {
+            padding: 10px 14px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            font-size: 0.95rem;
+            background: #34495e;
+            border-left: 5px solid #74b9ff;
+            animation: slide-in 0.3s ease-out;
+            transition: opacity 0.4s, transform 0.4s;
+        }
+        .toast.success { border-left-color: var(--success); }
+        .toast.error   { border-left-color: var(--danger); background: #4a2c2c; }
+        .toast.hide    { opacity: 0; transform: translateX(30px); }
+        @keyframes slide-in {
+            from { opacity: 0; transform: translateX(30px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        /* =========================================================
+           6. RESPONSIVE LAYOUT
+           ========================================================= */
+
+        /* Tablets: smaller cards and seats, panels stack */
+        @media (max-width: 860px) {
+            :root { --card-w: 40px; --card-h: 60px; --card-font: 0.95rem; --seat-w: 115px; }
+            #panels { grid-template-columns: 1fr; }
+            #poker-table { border-width: 12px; border-radius: 110px; }
+            #winner-title { font-size: 1.4rem; }
+        }
+
+        /* Phones: the table turns into a tall oval so seats fit */
+        @media (max-width: 600px) {
+            :root { --card-w: 30px; --card-h: 45px; --card-font: 0.75rem; --seat-w: 88px; }
+            body { padding: 10px; }
+            h1 { font-size: 1.35rem; }
+            header { justify-content: center; text-align: center; }
+            #poker-table { aspect-ratio: 4 / 5; border-width: 8px; border-radius: 70px; }
+            .card { padding: 2px 3px; border-radius: 4px; }
+            #community-cards { gap: 4px; }
+            .seat-name { font-size: 0.8rem; }
+            .chips, .bet { font-size: 0.75rem; }
+            #pot-display { font-size: 0.95rem; padding: 3px 10px; margin-bottom: 6px; }
+            /* Narrow and stacked so it stays between the side seats */
+            #winner-banner {
+                flex-direction: column;
+                gap: 4px;
+                padding: 5px 8px;
+                max-width: 170px;
+                border-width: 2px;
+                text-align: center;
+            }
+            #winner-title { font-size: 0.95rem; }
+            #winner-detail { font-size: 0.72rem; }
+            #winner-banner button { padding: 5px 8px; font-size: 0.75rem; }
+            #game-over-title { font-size: 1.8rem; }
+            .table-hint { font-size: 0.8rem; padding: 6px 10px; }
+            #controls { padding: 10px; gap: 8px; }
+            button { padding: 9px 12px; font-size: 0.9rem; }
+            #stats-tiles { grid-template-columns: repeat(2, 1fr); }
+            #toasts { left: 10px; right: 10px; max-width: none; }
+            .remove-bot { padding: 0 5px; font-size: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Bot Poker Studio</h1>
+        <div id="settings">
+            <label>Name
+                <input id="player-name" type="text" maxlength="12" placeholder="You">
+            </label>
+            <label>Bot speed
+                <select id="bot-speed">
+                    <option value="1500">Slow</option>
+                    <option value="900">Normal</option>
+                    <option value="350">Fast</option>
+                </select>
+            </label>
+            <button id="btn-new-game" class="secondary" onclick="confirmNewGame()">New Game</button>
+        </div>
+    </header>
+
+    <!-- Seats are created by JavaScript (renderSeats) so bots can come and go -->
+    <div id="poker-table">
+        <div id="game-over">
+            <div id="game-over-title"></div>
+            <div id="game-over-msg"></div>
+            <div id="game-over-stats"></div>
+            <button onclick="resetGame()">Play Again</button>
+        </div>
+
+        <div id="table-center">
+            <div id="winner-banner">
+                <div>
+                    <div id="winner-title"></div>
+                    <div id="winner-detail"></div>
+                </div>
+                <button onclick="startNewHand()">Next Hand</button>
+            </div>
+            <div id="pot-display">Pot: $0</div>
+            <div id="community-cards"></div>
+        </div>
+    </div>
+
+    <!-- Live win-chance calculator -->
+    <div id="odds-panel" aria-live="polite"></div>
+
+    <div id="controls">
+        <button id="btn-start" onclick="startNewHand()">New Hand</button>
+        <button id="btn-fold" onclick="humanAction('fold')" disabled>Fold</button>
+        <button id="btn-call" onclick="humanAction('checkcall')" disabled>Check</button>
+        <div class="raise-group">
+            <div class="raise-row">
+                <input id="raise-amount" type="number" step="5" inputmode="numeric" aria-label="Raise amount" disabled>
+                <button id="btn-raise" onclick="humanAction('raise')" disabled>Raise To</button>
+            </div>
+            <div id="raise-error" role="alert"></div>
+        </div>
+        <button id="btn-allin" onclick="humanAction('allin')" disabled>All-In</button>
+        <button id="btn-add-bot" class="secondary" onclick="addBot()">+ Add Bot</button>
+    </div>
+
+    <div id="status">Click "New Hand" to shuffle and deal.</div>
+
+    <div id="panels">
+        <section class="panel">
+            <h2>
+                Your Stats
+                <label><input type="checkbox" id="show-bots" checked> Show bots on chart</label>
+            </h2>
+            <div id="stats-tiles"></div>
+            <div id="chart-box">
+                <canvas id="chip-chart"></canvas>
+                <div id="chart-message"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Action Log</h2>
+            <div id="log"></div>
+        </section>
+    </div>
+
+    <div id="toasts" aria-live="polite"></div>
+
+    <script>
+        /* =========================================================
+           SETTINGS
+           ========================================================= */
+        const SUITS = ['♠', '♥', '♦', '♣'];
+        const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+        const SMALL_BLIND = 5;
+        const BIG_BLIND = 10;
+        const START_CHIPS = 1000;
+        const MAX_PLAYERS = 8;               // you + up to 7 bots
+        const ODDS_SIMULATIONS = 1500;       // how many random run-outs the odds calculator tries
+        const HISTORY_LIMIT = 100;           // hands kept for the chart
+        const SAVE_KEY = 'botPokerSave_v1';  // localStorage key
+        const CHART_URL = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+        const HAND_NAMES = ['High Card', 'Pair', 'Two Pair', 'Three of a Kind', 'Straight',
+                            'Flush', 'Full House', 'Four of a Kind', 'Straight Flush'];
+        const BOT_NAMES = ['Alice', 'Bob', 'Carmen', 'Dev', 'Elena', 'Felix', 'Grace', 'Hiro', 'Ivy', 'Jamal'];
+        const LINE_COLORS = ['#f1c40f', '#74b9ff', '#ff7675', '#55efc4', '#a29bfe', '#fd79a8', '#ffeaa7', '#81ecec'];
+
+        /* =========================================================
+           GAME STATE
+           ========================================================= */
+        // Seat order is clockwise, starting with you at the bottom.
+        let players = [{ name: 'You', isBot: false, chips: START_CHIPS }];
+
+        let deck = [];
+        let community = [];
+        let dealer = -1;          // index of the dealer button
+        let toAct = -1;           // index of the player whose turn it is
+        let stage = 0;            // 0 pre-flop, 1 flop, 2 turn, 3 river
+        let currentBet = 0;       // highest bet on this street
+        let minRaise = BIG_BLIND; // smallest legal raise size
+        let raisesThisStreet = 0;
+        let handInProgress = false;
+        let revealCards = false;
+        let highlighted = [];     // players who won the last hand (their seats glow)
+
+        // Saved between visits
+        let stats = freshStats();
+        let history = [];         // [{ hand: 3, chips: { 'You': 1040, 'Bot Alice': 960 } }, ...]
+        let settings = { playerName: '', botSpeed: 900 };
+
+        // Odds calculator cache, so we don't recompute when nothing changed
+        let oddsKey = '';
+        let oddsResult = null;
+
+        // Chart
+        let chart = null;
+        let chartStatus = 'loading'; // 'loading' | 'ready' | 'failed'
+
+        let storageWarned = false;
+
+        function freshStats() {
+            return { handsPlayed: 0, handsWon: 0, biggestWin: 0, bestHand: -1 };
+        }
+
+        /* =========================================================
+           SMALL HELPERS
+           ========================================================= */
+        const isSeated = p => !p.out;
+        const isInHand = p => !p.out && !p.folded;
+        const canAct   = p => !p.out && !p.folded && !p.allIn;
+
+        // Next player after index i (wrapping around) who passes a test
+        function nextIndex(i, test) {
+            for (let k = 1; k <= players.length; k++) {
+                const idx = (i + k + players.length) % players.length;
+                if (test(players[idx])) return idx;
+            }
+            return -1;
+        }
+
+        // "You call" vs "Bot Alice calls"
+        function v(p, verb) {
+            return p.isBot ? verb + 's' : verb;
+        }
+
+        function totalPot() {
+            return players.reduce((sum, p) => sum + (p.total || 0), 0);
+        }
+
+        // Stops a typed name from being read as HTML
+        function escapeHTML(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function seatLabel(p) {
+            if (p.isBot) return p.name;
+            return settings.playerName ? `${settings.playerName} (You)` : 'You';
+        }
+
+        function log(html) {
+            const box = document.getElementById('log');
+            const empty = box.querySelector('.muted');
+            if (empty) empty.remove();
+            const line = document.createElement('div');
+            line.innerHTML = html;
+            box.appendChild(line);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function showEmptyLog() {
+            document.getElementById('log').innerHTML =
+                '<div class="muted">No actions yet. Click New Hand to start playing.</div>';
+        }
+
+        function setStatus(text) {
+            document.getElementById('status').textContent = text;
+        }
+
+        // Toast notification: type is 'info', 'success' or 'error'
+        function toast(message, type = 'info', ms = 3200) {
+            const box = document.getElementById('toasts');
+            const el = document.createElement('div');
+            el.className = 'toast ' + type;
+            el.textContent = message;
+            box.appendChild(el);
+            setTimeout(() => {
+                el.classList.add('hide');
+                setTimeout(() => el.remove(), 400);
+            }, ms);
+        }
+
+        function cardsText(cards) {
+            return cards.map(c => `<span class="${c.isRed ? 'red-text' : ''}">${c.value}${c.suit}</span>`).join(' ');
+        }
+
+        function newDeck() {
+            const cards = [];
+            for (let suit of SUITS) {
+                for (let value of VALUES) {
+                    cards.push({ value, suit, isRed: (suit === '♥' || suit === '♦') });
+                }
+            }
+            return cards;
+        }
+
+        // Fisher-Yates shuffle
+        function shuffle(cards) {
+            for (let i = cards.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [cards[i], cards[j]] = [cards[j], cards[i]];
+            }
+            return cards;
+        }
+
+        function cardHTML(card, hide = false) {
+            if (hide) return `<div class="card card-back">?</div>`;
+            return `<div class="card ${card.isRed ? 'red' : ''}">
+                        <div>${card.value}</div>
+                        <div style="align-self: flex-end;">${card.suit}</div>
+                    </div>`;
+        }
+
+        // Move chips from a player's stack into the pot
+        function postBet(p, amount) {
+            const paid = Math.min(amount, p.chips);
+            p.chips -= paid;
+            p.bet += paid;
+            p.total += paid;
+            if (p.chips === 0) p.allIn = true;
+            return paid;
+        }
+
+        /* =========================================================
+           SAVING & LOADING (localStorage)
+           Only saved between hands, so a reload mid-hand puts you
+           back at the start of that hand.
+           ========================================================= */
+        function saveGame() {
+            const data = {
+                version: 1,
+                players: players.map(p => ({ name: p.name, isBot: p.isBot, chips: p.chips })),
+                dealer, stats, history, settings
+            };
+            try {
+                localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+                return true;
+            } catch (err) {
+                // Private browsing or blocked storage: keep playing, warn once
+                if (!storageWarned) {
+                    toast("Couldn't save your progress (browser storage is blocked). The game still works but won't be remembered.", 'error', 6000);
+                    storageWarned = true;
+                }
+                return false;
+            }
+        }
+
+        // Returns true if a valid save was restored
+        function loadGame() {
+            let raw;
+            try {
+                raw = localStorage.getItem(SAVE_KEY);
+            } catch (err) {
+                return false; // storage blocked; saveGame() will warn later
+            }
+            if (!raw) return false; // first visit
+
+            try {
+                const data = JSON.parse(raw);
+                const okPlayers = Array.isArray(data.players)
+                    && data.players.length >= 2
+                    && data.players.length <= MAX_PLAYERS
+                    && data.players[0].isBot === false
+                    && data.players.every(p => typeof p.name === 'string'
+                        && Number.isInteger(p.chips) && p.chips >= 0);
+                if (!okPlayers) throw new Error('bad players');
+
+                players = data.players.map(p => ({ name: p.name, isBot: !!p.isBot, chips: p.chips }));
+                dealer = Number.isInteger(data.dealer) && data.dealer < players.length ? data.dealer : -1;
+                stats = Object.assign(freshStats(), data.stats);
+                history = Array.isArray(data.history) ? data.history.slice(-HISTORY_LIMIT) : [];
+                settings = Object.assign({ playerName: '', botSpeed: 900 }, data.settings);
+                return true;
+            } catch (err) {
+                // Corrupted or old-format save: start fresh instead of crashing
+                try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+                toast("Your saved game couldn't be read, so a new game was started.", 'error', 5000);
+                return false;
+            }
+        }
+
+        function recordHistory() {
+            const chips = {};
+            players.forEach(p => chips[p.name] = p.chips);
+            history.push({ hand: stats.handsPlayed, chips });
+            if (history.length > HISTORY_LIMIT) history.shift();
+        }
+
+        /* =========================================================
+           STARTING A HAND
+           ========================================================= */
+        function startNewHand() {
+            if (handInProgress) return;
+
+            // You're broke, or every bot is: start a whole new game
+            if (players[0].chips === 0 || players.slice(1).every(p => p.chips === 0)) {
+                return resetGame();
+            }
+
+            hideBanner();
+            deck = shuffle(newDeck());
+            community = [];
+            stage = 0;
+            raisesThisStreet = 0;
+            revealCards = false;
+            oddsKey = '';
+            clearRaiseError();
+
+            players.forEach(p => {
+                p.hand = [];
+                p.folded = false;
+                p.bet = 0;
+                p.total = 0;
+                p.allIn = false;
+                p.hasActed = false;
+                p.score = null;
+                p.out = (p.chips === 0);
+                p.startChips = p.chips;
+            });
+            players.forEach(p => { if (!p.out) p.hand = [deck.pop(), deck.pop()]; });
+
+            // Move the dealer button and post blinds
+            dealer = nextIndex(dealer, isSeated);
+            const seatedCount = players.filter(isSeated).length;
+            let sb, bb;
+            if (seatedCount === 2) {        // heads-up: dealer posts the small blind
+                sb = dealer;
+                bb = nextIndex(dealer, isSeated);
+            } else {
+                sb = nextIndex(dealer, isSeated);
+                bb = nextIndex(sb, isSeated);
+            }
+
+            handInProgress = true;
+            log(`<hr>Hand #${stats.handsPlayed + 1}. ${players[dealer].name} ${players[dealer].isBot ? 'has' : 'have'} the dealer button.`);
+            postBlind(players[sb], SMALL_BLIND, 'small blind');
+            postBlind(players[bb], BIG_BLIND, 'big blind');
+
+            currentBet = BIG_BLIND;
+            minRaise = BIG_BLIND;
+            toAct = nextIndex(bb, canAct); // first to act pre-flop is left of the big blind
+            nextTurn();
+        }
+
+        function postBlind(p, amount, label) {
+            const paid = postBet(p, amount);
+            log(`${p.name} ${v(p, 'post')} the ${label} ($${paid}).`);
+        }
+
+        /* =========================================================
+           TURN FLOW
+           ========================================================= */
+        // A betting round is over when everyone who can still act
+        // has acted and matched the current bet
+        function roundComplete() {
+            const actable = players.filter(canAct);
+            if (actable.length === 0) return true;
+            if (actable.length === 1 && actable[0].bet >= currentBet) return true;
+            return actable.every(p => p.hasActed && p.bet === currentBet);
+        }
+
+        function nextTurn() {
+            updateUI();
+
+            const live = players.filter(isInHand);
+            if (live.length === 1) return winByFold(live[0]);
+
+            if (roundComplete()) {
+                setControls(false);
+                setTimeout(advanceStage, 700);
+                return;
+            }
+
+            const p = players[toAct];
+            if (p.isBot) {
+                setControls(false);
+                setStatus(`${p.name} is thinking`);
+                document.getElementById('status').classList.add('thinking');
+                setTimeout(() => botAct(p), settings.botSpeed);
+            } else {
+                document.getElementById('status').classList.remove('thinking');
+                const toCall = currentBet - p.bet;
+                setStatus(toCall > 0 ? `Your turn: $${Math.min(toCall, p.chips)} to call.` : 'Your turn: you can check.');
+                setControls(true);
+            }
+            updateOdds();
+        }
+
+        // Apply an action (used by both you and the bots)
+        function act(p, action, raiseTo = 0) {
+            const toCall = currentBet - p.bet;
+
+            if (action === 'fold') {
+                p.folded = true;
+                log(`${p.name} ${v(p, 'fold')}.`);
+            } else if (action === 'check') {
+                log(`${p.name} ${v(p, 'check')}.`);
+            } else if (action === 'call') {
+                const paid = postBet(p, toCall);
+                log(`${p.name} ${v(p, 'call')} $${paid}${p.allIn ? ' and ' + (p.isBot ? 'is' : 'are') + ' all-in' : ''}.`);
+            } else if (action === 'raise') {
+                raiseTo = Math.min(raiseTo, p.chips + p.bet);
+                postBet(p, raiseTo - p.bet);
+                const increase = p.bet - currentBet;
+                if (increase >= minRaise) minRaise = increase;
+                currentBet = Math.max(currentBet, p.bet);
+                raisesThisStreet++;
+                // Everyone else has to respond to the raise
+                players.forEach(o => { if (o !== p) o.hasActed = false; });
+                log(`${p.name} ${v(p, 'raise')} to $${p.bet}${p.allIn ? ' (all-in)' : ''}.`);
+            }
+
+            p.hasActed = true;
+            toAct = nextIndex(players.indexOf(p), canAct);
+            nextTurn();
+        }
+
+        // Deal the next street, or go to showdown after the river
+        function advanceStage() {
+            players.forEach(p => { p.bet = 0; p.hasActed = false; });
+            currentBet = 0;
+            minRaise = BIG_BLIND;
+            raisesThisStreet = 0;
+            stage++;
+
+            if (stage === 1) {
+                community.push(deck.pop(), deck.pop(), deck.pop());
+                log(`<b>Flop:</b> ${cardsText(community)}`);
+            } else if (stage === 2 || stage === 3) {
+                community.push(deck.pop());
+                log(`<b>${stage === 2 ? 'Turn' : 'River'}:</b> ${cardsText(community)}`);
+            } else {
+                return showdown();
+            }
+
+            toAct = nextIndex(dealer, canAct); // first active player left of the dealer
+            nextTurn();
+        }
+
+        /* =========================================================
+           ENDING A HAND
+           ========================================================= */
+        function winByFold(winner) {
+            const pot = totalPot();
+            winner.chips += pot;
+            log(`<b>${winner.name} ${v(winner, 'win')} $${pot}</b>. Everyone else folded.`);
+            showBanner(`${winner.name} ${v(winner, 'win')}!`,
+                       [`$${pot}. Everyone else folded.`], [winner]);
+            endHand();
+        }
+
+        function showdown() {
+            revealCards = true;
+            const contenders = players.filter(isInHand);
+
+            contenders.forEach(p => {
+                p.score = bestHand([...p.hand, ...community]);
+                log(`${p.name} ${v(p, 'show')} ${cardsText(p.hand)}: ${HAND_NAMES[p.score[0]]}`);
+            });
+
+            // Main pot and side pots, based on how much each contender put in
+            const levels = [...new Set(contenders.map(p => p.total))].sort((a, b) => a - b);
+            let prev = 0;
+            let distributed = 0;
+            let lastWinners = [];
+            const potResults = []; // for the winner banner
+
+            levels.forEach((level, i) => {
+                let amount = 0;
+                players.forEach(p => {
+                    amount += Math.min(p.total, level) - Math.min(p.total, prev);
+                });
+
+                const eligible = contenders.filter(p => p.total >= level);
+                let winners = [];
+                eligible.forEach(p => {
+                    if (!winners.length) { winners = [p]; return; }
+                    const cmp = compareScores(p.score, winners[0].score);
+                    if (cmp > 0) winners = [p];
+                    else if (cmp === 0) winners.push(p);
+                });
+
+                const share = Math.floor(amount / winners.length);
+                winners.forEach(p => p.chips += share);
+                winners[0].chips += amount - share * winners.length; // odd chip
+                distributed += amount;
+                lastWinners = winners;
+
+                if (eligible.length === 1 && i > 0) {
+                    log(`${winners[0].name} ${v(winners[0], 'get')} $${amount} back (nobody could match it).`);
+                } else {
+                    const potName = levels.length > 1 ? (i === 0 ? 'the main pot' : 'a side pot') : 'the pot';
+                    const names = winners.map(p => p.name).join(' & ');
+                    const verb = winners.length > 1 ? 'split' : v(winners[0], 'win');
+                    const hand = HAND_NAMES[winners[0].score[0]];
+                    log(`<b>${names} ${verb} ${potName} ($${amount})</b> with ${hand}.`);
+                    potResults.push({ winners, names, amount, hand });
+                }
+                prev = level;
+            });
+
+            // Safety net: any leftover chips go to the last winner
+            const leftover = totalPot() - distributed;
+            if (leftover > 0) lastWinners[0].chips += leftover;
+
+            // Announce the result in the middle of the table
+            const main = potResults[0];
+            const title = main.winners.length > 1
+                ? 'Split Pot!'
+                : `${main.names} ${v(main.winners[0], 'win')}!`;
+            let lines;
+            if (potResults.length === 1) {
+                lines = [main.winners.length > 1
+                    ? `${main.names} split $${main.amount} with ${main.hand}`
+                    : `$${main.amount} with ${main.hand}`];
+            } else {
+                lines = potResults.map((r, i) =>
+                    `${i === 0 ? 'Main pot' : 'Side pot'} ($${r.amount}): ${r.names} (${r.hand})`);
+            }
+            const allWinners = [...new Set(potResults.flatMap(r => r.winners))];
+            showBanner(title, lines, allWinners);
+
+            endHand();
+        }
+
+        function endHand() {
+            handInProgress = false;
+            toAct = -1;
+            players.forEach(p => { p.bet = 0; p.total = 0; });
+            document.getElementById('status').classList.remove('thinking');
+
+            // --- Update your stats ---
+            const you = players[0];
+            const gain = you.chips - you.startChips;
+            stats.handsPlayed++;
+            if (highlighted.includes(you)) stats.handsWon++;
+            stats.biggestWin = Math.max(stats.biggestWin, gain);
+            if (you.score && !you.folded) stats.bestHand = Math.max(stats.bestHand, you.score[0]);
+            if (gain > 0) toast(`You won $${gain}!`, 'success');
+
+            // --- Announce any bot that just went broke ---
+            const busted = players.filter(p => p.isBot && p.chips === 0 && !p.out);
+            busted.forEach(p => {
+                log(`<b class="bust-note">${p.name} is out of chips!</b>`);
+                document.getElementById('winner-detail').innerHTML +=
+                    `<br><span class="bust-note">${p.name} is out of chips!</span>`;
+            });
+
+            recordHistory();
+            saveGame();
+            updateUI();
+            renderStats();
+            updateOdds();
+            setControls(false);
+
+            if (you.chips === 0) {
+                setStatus("You're out of chips!");
+                log('<b class="bust-note">You are out of chips. Game over.</b>');
+                setTimeout(() => showGameOver(false), 1800); // let the banner show first
+            } else if (players.slice(1).every(p => p.chips === 0)) {
+                setStatus('You cleared the table!');
+                log('<b>Every bot is out of chips. You cleared the table!</b>');
+                setTimeout(() => showGameOver(true), 1800);
+            } else {
+                setStatus('Hand over. Click New Hand to deal again.');
+            }
+        }
+
+        /* --- Winner banner --- */
+        function showBanner(title, lines, winners) {
+            highlighted = winners;
+            document.getElementById('winner-title').textContent = title;
+            document.getElementById('winner-detail').innerHTML = lines.join('<br>');
+            document.getElementById('winner-banner').style.display = 'flex';
+            document.getElementById('pot-display').style.display = 'none';
+        }
+
+        function hideBanner() {
+            highlighted = [];
+            document.getElementById('winner-banner').style.display = 'none';
+            document.getElementById('pot-display').style.display = '';
+        }
+
+        /* --- Game over --- */
+        function showGameOver(won) {
+            const screen = document.getElementById('game-over');
+            screen.className = won ? 'won' : 'lost';
+            document.getElementById('game-over-title').textContent =
+                won ? 'You Cleared the Table!' : 'Game Over';
+            document.getElementById('game-over-msg').textContent = won
+                ? `Every bot is out of chips. You finished with $${players[0].chips}.`
+                : 'You ran out of chips.';
+            document.getElementById('game-over-stats').textContent =
+                `Hands played: ${stats.handsPlayed}  ·  Biggest win: $${stats.biggestWin}`;
+            document.getElementById('winner-banner').style.display = 'none';
+            screen.style.display = 'flex';
+            document.getElementById('btn-start').disabled = true;
+        }
+
+        // Start a fresh game: everyone back to the starting stack
+        function resetGame() {
+            document.getElementById('game-over').style.display = 'none';
+            hideBanner();
+            players.forEach(p => {
+                p.chips = START_CHIPS;
+                p.hand = [];
+                p.out = false;
+                p.folded = false;
+                p.score = null;
+            });
+            community = [];
+            stats = freshStats();
+            history = [];
+            recordHistory();   // starting point for the chart
+            dealer = -1;
+            showEmptyLog();
+            log(`<b>New game! Everyone starts with $${START_CHIPS}.</b>`);
+            saveGame();
+            renderStats();
+            toast('New game started. Good luck!', 'success');
+            startNewHand();
+        }
+
+        // "New Game" in the header needs a second click to confirm
+        let confirmTimer = null;
+        function confirmNewGame() {
+            const btn = document.getElementById('btn-new-game');
+            if (handInProgress) {
+                toast('Finish this hand before starting a new game.', 'error');
+                return;
+            }
+            if (!confirmTimer) {
+                btn.textContent = 'Click again to confirm';
+                btn.classList.add('danger-confirm');
+                confirmTimer = setTimeout(resetConfirm, 3000);
+                return;
+            }
+            resetConfirm();
+            resetGame();
+        }
+        function resetConfirm() {
+            clearTimeout(confirmTimer);
+            confirmTimer = null;
+            const btn = document.getElementById('btn-new-game');
+            btn.textContent = 'New Game';
+            btn.classList.remove('danger-confirm');
+        }
+
+        /* =========================================================
+           YOUR CONTROLS (with input validation)
+           ========================================================= */
+        function humanAction(action) {
+            const p = players[0];
+            if (!handInProgress || toAct !== 0) return;
+
+            const maxBet = p.chips + p.bet;
+            if (action === 'raise') {
+                const check = validateRaise();
+                if (!check.ok) {
+                    showRaiseError(check.message);
+                    return; // stay on your turn so you can fix it
+                }
+                setControls(false);
+                act(p, 'raise', check.amount);
+                return;
+            }
+
+            setControls(false);
+            if (action === 'fold') {
+                act(p, 'fold');
+            } else if (action === 'checkcall') {
+                act(p, currentBet > p.bet ? 'call' : 'check');
+            } else if (action === 'allin') {
+                act(p, maxBet > currentBet ? 'raise' : 'call', maxBet);
+            }
+        }
+
+        // Checks the raise box. Returns { ok, amount } or { ok: false, message }
+        function validateRaise() {
+            const p = players[0];
+            const input = document.getElementById('raise-amount');
+            const text = input.value.trim();
+            const amount = Number(text);
+            const maxBet = p.chips + p.bet;
+            const minTo = Math.min(currentBet + minRaise, maxBet);
+
+            if (text === '' || !Number.isInteger(amount)) {
+                return { ok: false, message: 'Enter a whole dollar amount.' };
+            }
+            if (amount > maxBet) {
+                return { ok: false, message: `You only have $${maxBet}. Use All-In to bet it all.` };
+            }
+            if (amount < minTo) {
+                return { ok: false, message: `The smallest raise is to $${minTo}.` };
+            }
+            return { ok: true, amount };
+        }
+
+        function showRaiseError(message) {
+            document.getElementById('raise-amount').classList.add('invalid');
+            document.getElementById('raise-error').textContent = message;
+        }
+
+        function clearRaiseError() {
+            document.getElementById('raise-amount').classList.remove('invalid');
+            document.getElementById('raise-error').textContent = '';
+        }
+
+        // Real-time feedback while typing a raise amount
+        document.getElementById('raise-amount').addEventListener('input', () => {
+            const check = validateRaise();
+            if (check.ok) clearRaiseError();
+            else showRaiseError(check.message);
+        });
+
+        // Press Enter in the raise box to raise
+        document.getElementById('raise-amount').addEventListener('keydown', e => {
+            if (e.key === 'Enter') humanAction('raise');
+        });
+
+        function setControls(enabled) {
+            const p = players[0];
+            const toCall = Math.max(0, currentBet - (p.bet || 0));
+            const callBtn = document.getElementById('btn-call');
+            const raiseInput = document.getElementById('raise-amount');
+
+            document.getElementById('btn-fold').disabled = !enabled;
+            document.getElementById('btn-allin').disabled = !enabled;
+            callBtn.disabled = !enabled;
+            callBtn.textContent = toCall > 0 ? `Call $${Math.min(toCall, p.chips)}` : 'Check';
+
+            const canRaise = enabled && p.chips > toCall;
+            document.getElementById('btn-raise').disabled = !canRaise;
+            raiseInput.disabled = !canRaise;
+            clearRaiseError();
+            if (canRaise) {
+                const minTo = Math.min(currentBet + minRaise, p.chips + p.bet);
+                raiseInput.min = minTo;
+                raiseInput.max = p.chips + p.bet;
+                raiseInput.value = minTo;
+            }
+
+            const gameOverShowing = document.getElementById('game-over').style.display === 'flex';
+            document.getElementById('btn-start').disabled = handInProgress || gameOverShowing;
+            document.getElementById('btn-add-bot').disabled = handInProgress || players.length >= MAX_PLAYERS;
+        }
+
+        /* =========================================================
+           LIVE ODDS CALCULATOR (Monte Carlo simulation)
+           Deals out the rest of the hand at random many times and
+           counts how often your cards win.
+           ========================================================= */
+        function estimateWinChance(you, opponents, board, runs) {
+            // Cards you can't see: everything except your hand and the board
+            const known = new Set([...you.hand, ...board].map(c => c.value + c.suit));
+            const unseen = newDeck().filter(c => !known.has(c.value + c.suit));
+            const needBoard = 5 - board.length;
+            const needed = needBoard + opponents * 2;
+            let wins = 0;
+
+            for (let r = 0; r < runs; r++) {
+                // Partial shuffle: only randomize the cards we need
+                for (let i = 0; i < needed; i++) {
+                    const j = i + Math.floor(Math.random() * (unseen.length - i));
+                    [unseen[i], unseen[j]] = [unseen[j], unseen[i]];
+                }
+                const fullBoard = board.concat(unseen.slice(0, needBoard));
+                const myScore = bestHand([...you.hand, ...fullBoard]);
+
+                let beaten = false;
+                let ties = 0;
+                for (let o = 0; o < opponents; o++) {
+                    const start = needBoard + o * 2;
+                    const theirs = bestHand([unseen[start], unseen[start + 1], ...fullBoard]);
+                    const cmp = compareScores(theirs, myScore);
+                    if (cmp > 0) { beaten = true; break; }
+                    if (cmp === 0) ties++;
+                }
+                if (!beaten) wins += 1 / (ties + 1); // a tie counts as a share of the pot
+            }
+            return wins / runs;
+        }
+
+        function updateOdds() {
+            const panel = document.getElementById('odds-panel');
+            const you = players[0];
+
+            // Empty states
+            if (!handInProgress) {
+                panel.innerHTML = `<span class="muted">Your win chance shows here once you're dealt in.</span>`;
+                return;
+            }
+            if (you.folded || you.out) {
+                panel.innerHTML = `<span class="muted">You folded this hand. Watch the bots play it out.</span>`;
+                return;
+            }
+
+            const opponents = players.filter(p => p !== you && isInHand(p)).length;
+            const key = `${community.length}-${opponents}`;
+
+            // Same street and same opponents: reuse the last answer
+            if (key === oddsKey && oddsResult !== null) {
+                renderOdds(oddsResult, opponents);
+                return;
+            }
+
+            // Loading state, then run the simulation on the next tick so the spinner can paint
+            oddsKey = key;
+            oddsResult = null;
+            panel.innerHTML = `<span><span class="spinner"></span>Calculating your odds…</span>`;
+            setTimeout(() => {
+                if (!handInProgress || oddsKey !== key) return; // hand moved on
+                oddsResult = estimateWinChance(you, opponents, community, ODDS_SIMULATIONS);
+                renderOdds(oddsResult, opponents);
+            }, 30);
+        }
+
+        function renderOdds(chance, opponents) {
+            const you = players[0];
+            const pct = Math.round(chance * 100);
+            const toCall = Math.min(Math.max(0, currentBet - you.bet), you.chips);
+            let html = `<span>Win chance vs ${opponents} opponent${opponents === 1 ? '' : 's'}:
+                        <span class="odds-big">${pct}%</span></span>`;
+
+            if (toCall > 0 && toAct === 0) {
+                // Pot odds: the share of the final pot you'd be paying
+                const need = Math.round(toCall / (totalPot() + toCall) * 100);
+                const good = pct >= need;
+                html += `<span>To call $${toCall} you need
+                         <span class="odds-big ${good ? 'odds-good' : 'odds-bad'}">${need}%</span>
+                         → ${good ? 'calling is profitable' : 'calling loses money long-term'}</span>`;
+            }
+            document.getElementById('odds-panel').innerHTML = html;
+        }
+
+        /* =========================================================
+           BOT BRAIN
+           ========================================================= */
+        // Rough 0-1 estimate of how good a bot's hand is
+        function botStrength(p) {
+            if (community.length === 0) {
+                const [a, b] = p.hand.map(c => rankValue(c.value));
+                let s = (a + b) / 28;
+                if (a === b) s += 0.35;                            // pocket pair
+                if (p.hand[0].suit === p.hand[1].suit) s += 0.05;  // suited
+                return Math.min(s, 1);
+            }
+            const score = bestHand([...p.hand, ...community]);
+            return Math.min(1, 0.2 + score[0] * 0.18);
+        }
+
+        function botAct(p) {
+            if (!handInProgress || players[toAct] !== p) return;
+
+            const toCall = Math.min(currentBet - p.bet, p.chips);
+            const pot = totalPot();
+            const strength = botStrength(p) + (Math.random() * 0.3 - 0.15); // a little randomness
+            const canRaise = p.chips > toCall && raisesThisStreet < 3;
+            const raiseSize = Math.max(minRaise, Math.round(pot * 0.6 / 5) * 5);
+            const raiseTo = Math.min(p.chips + p.bet, currentBet + raiseSize);
+
+            // Strong hand (or the occasional bluff when nobody has bet): raise
+            if (canRaise && (strength > 0.75 || (toCall === 0 && Math.random() < 0.1))) {
+                return act(p, 'raise', raiseTo);
+            }
+            if (toCall === 0) return act(p, 'check');
+
+            // Call if the hand is good enough for the price
+            const potOdds = toCall / (pot + toCall);
+            if (strength > potOdds + 0.25 || (toCall <= BIG_BLIND && strength > 0.3)) {
+                return act(p, 'call');
+            }
+            return act(p, 'fold');
+        }
+
+        /* =========================================================
+           HAND EVALUATION
+           ========================================================= */
+        function rankValue(value) { return VALUES.indexOf(value) + 2; } // 2..14 (Ace = 14)
+
+        // Score a 5-card hand as [category, tiebreakers...]; bigger is better
+        function evaluateFive(cards) {
+            const ranks = cards.map(c => rankValue(c.value)).sort((a, b) => b - a);
+            const isFlush = cards.every(c => c.suit === cards[0].suit);
+
+            let straightHigh = 0;
+            if (new Set(ranks).size === 5) {
+                if (ranks[0] - ranks[4] === 4) straightHigh = ranks[0];
+                else if (ranks[0] === 14 && ranks[1] === 5) straightHigh = 5; // A-2-3-4-5
+            }
+
+            const counts = {};
+            ranks.forEach(r => counts[r] = (counts[r] || 0) + 1);
+            const groups = Object.entries(counts)
+                .map(([rank, count]) => [count, +rank])
+                .sort((a, b) => b[0] - a[0] || b[1] - a[1]);
+            const ordered = groups.map(g => g[1]);
+
+            if (straightHigh && isFlush)                      return [8, straightHigh];
+            if (groups[0][0] === 4)                           return [7, ...ordered];
+            if (groups[0][0] === 3 && groups[1][0] === 2)     return [6, ...ordered];
+            if (isFlush)                                      return [5, ...ranks];
+            if (straightHigh)                                 return [4, straightHigh];
+            if (groups[0][0] === 3)                           return [3, ...ordered];
+            if (groups[0][0] === 2 && groups[1][0] === 2)     return [2, ...ordered];
+            if (groups[0][0] === 2)                           return [1, ...ordered];
+            return [0, ...ranks];
+        }
+
+        // Best 5-card score out of 5-7 cards (tries every combination)
+        function bestHand(cards) {
+            let best = null;
+            const pick = (start, chosen) => {
+                if (chosen.length === 5) {
+                    const score = evaluateFive(chosen);
+                    if (!best || compareScores(score, best) > 0) best = score;
+                    return;
+                }
+                for (let i = start; i < cards.length; i++) {
+                    chosen.push(cards[i]);
+                    pick(i + 1, chosen);
+                    chosen.pop();
+                }
+            };
+            pick(0, []);
+            return best;
+        }
+
+        function compareScores(a, b) {
+            for (let i = 0; i < Math.max(a.length, b.length); i++) {
+                const diff = (a[i] || 0) - (b[i] || 0);
+                if (diff !== 0) return diff;
+            }
+            return 0;
+        }
+
+        /* =========================================================
+           ADDING & REMOVING BOTS (between hands only)
+           ========================================================= */
+        function addBot() {
+            if (handInProgress || players.length >= MAX_PLAYERS) return;
+            const used = players.map(p => p.name);
+            const free = BOT_NAMES.find(n => !used.includes('Bot ' + n));
+            const name = 'Bot ' + (free || players.length);
+            players.push({ name, isBot: true, chips: START_CHIPS });
+            log(`${name} sits down with $${START_CHIPS}.`);
+            toast(`${name} joined the table.`, 'success');
+            afterSeatChange();
+        }
+
+        function removeBot(i) {
+            if (handInProgress || !players[i] || !players[i].isBot) return;
+            if (players.length <= 2) {
+                toast('You need at least one bot to play against.', 'error');
+                return;
+            }
+            const [gone] = players.splice(i, 1);
+            if (i <= dealer) dealer--; // keep the dealer button on the same person
+            log(`${gone.name} leaves the table${gone.chips ? ` with $${gone.chips}` : ''}.`);
+            toast(`${gone.name} left the table.`, 'info');
+            afterSeatChange();
+        }
+
+        function afterSeatChange() {
+            hideBanner();
+            renderSeats();
+            updateUI();
+            setControls(false);
+            saveGame();
+            renderStats();
+        }
+
+        // Build one seat per player, spaced evenly around the oval.
+        // Positions are percentages so they scale with the table.
+        function renderSeats() {
+            const table = document.getElementById('poker-table');
+            table.querySelectorAll('.player-seat').forEach(el => el.remove());
+
+            const n = players.length;
+            players.forEach((p, i) => {
+                // You sit at the bottom (90 degrees); others go clockwise from there
+                const angle = (90 + i * 360 / n) * Math.PI / 180;
+                const seat = document.createElement('div');
+                seat.className = 'player-seat';
+                seat.id = 'seat-' + i;
+                seat.style.left = (50 + 38 * Math.cos(angle)) + '%';
+                seat.style.top  = (50 + 36 * Math.sin(angle)) + '%';
+                seat.innerHTML = `
+                    ${p.isBot ? `<button class="remove-bot" title="Remove ${p.name}" aria-label="Remove ${p.name}" onclick="removeBot(${i})">×</button>` : ''}
+                    <div class="seat-name"></div>
+                    <div class="chips"></div>
+                    <div class="card-container"></div>
+                    <div class="bet"></div>`;
+                table.appendChild(seat);
+            });
+        }
+
+        /* =========================================================
+           DRAWING THE TABLE
+           ========================================================= */
+        function updateUI() {
+            document.getElementById('pot-display').textContent = `Pot: $${totalPot()}`;
+
+            // Empty state in the middle before anything is dealt
+            const middle = document.getElementById('community-cards');
+            if (community.length) {
+                middle.innerHTML = community.map(c => cardHTML(c)).join('');
+            } else if (!handInProgress && !players[0].hand?.length) {
+                middle.innerHTML = '<div class="table-hint">Click New Hand to deal</div>';
+            } else {
+                middle.innerHTML = '';
+            }
+
+            players.forEach((p, i) => {
+                const seat = document.getElementById('seat-' + i);
+                if (!seat) return;
+                seat.classList.toggle('active', handInProgress && i === toAct);
+                seat.classList.toggle('folded', !!p.folded || !!p.out);
+                seat.classList.toggle('winner', highlighted.includes(p));
+
+                seat.querySelector('.seat-name').innerHTML =
+                    escapeHTML(seatLabel(p)) + (i === dealer ? ' <span class="dealer-btn">D</span>' : '');
+                seat.querySelector('.chips').textContent = `$${p.chips}`;
+
+                let cards = '';
+                if (p.out || (!handInProgress && p.chips === 0)) cards = '<i>Out of chips</i>';
+                else if (p.hand && p.hand.length) {
+                    const hide = p.isBot && !(revealCards && !p.folded);
+                    cards = p.hand.map(c => cardHTML(c, hide)).join('');
+                }
+                seat.querySelector('.card-container').innerHTML = cards;
+
+                let betText = '';
+                if (p.folded) betText = 'Folded';
+                else if (revealCards && p.score && !p.out) betText = HAND_NAMES[p.score[0]]; // showdown
+                else if (p.allIn && handInProgress) betText = 'All-in';
+                else if (p.bet) betText = `Bet: $${p.bet}`;
+                seat.querySelector('.bet').textContent = betText;
+
+                // Remove button: only between hands, and keep at least one bot
+                const removeBtn = seat.querySelector('.remove-bot');
+                if (removeBtn) removeBtn.style.display = (!handInProgress && players.length > 2) ? '' : 'none';
+            });
+        }
+
+        /* =========================================================
+           STATS TILES + CHIP CHART (Chart.js)
+           ========================================================= */
+        function renderStats() {
+            const winRate = stats.handsPlayed ? Math.round(stats.handsWon / stats.handsPlayed * 100) + '%' : '—';
+            const tiles = [
+                ['Hands played', stats.handsPlayed || '—'],
+                ['Win rate', winRate],
+                ['Biggest win', stats.biggestWin > 0 ? '$' + stats.biggestWin : '—'],
+                ['Best hand', stats.bestHand >= 0 ? HAND_NAMES[stats.bestHand] : '—'],
+            ];
+            document.getElementById('stats-tiles').innerHTML = tiles.map(([label, value]) =>
+                `<div class="tile"><div class="tile-value">${value}</div><div class="tile-label">${label}</div></div>`
+            ).join('');
+            renderChart();
+        }
+
+        function renderChart() {
+            const message = document.getElementById('chart-message');
+            const canvas = document.getElementById('chip-chart');
+
+            // Loading, error and empty states
+            if (chartStatus === 'loading') {
+                message.innerHTML = '<span><span class="spinner"></span>Loading chart…</span>';
+                message.style.display = 'flex';
+                return;
+            }
+            if (chartStatus === 'failed') {
+                message.textContent = "The chart couldn't load (are you offline?). Your stats above still work.";
+                message.style.display = 'flex';
+                canvas.style.display = 'none';
+                return;
+            }
+            if (stats.handsPlayed === 0) {
+                message.textContent = 'Play a hand to see how everyone\'s chips change over time.';
+                message.style.display = 'flex';
+                canvas.style.visibility = 'hidden';
+                return;
+            }
+            message.style.display = 'none';
+            canvas.style.visibility = 'visible';
+
+            const showBots = document.getElementById('show-bots').checked;
+            const shown = players.filter(p => !p.isBot || showBots);
+            const labels = history.map(h => h.hand === 0 ? 'Start' : '#' + h.hand);
+            const datasets = shown.map(p => {
+                const color = LINE_COLORS[players.indexOf(p) % LINE_COLORS.length];
+                return {
+                    label: p.isBot ? p.name : seatLabel(p),
+                    data: history.map(h => h.chips[p.name] ?? null),
+                    borderColor: color,
+                    backgroundColor: color,
+                    borderWidth: p.isBot ? 2 : 4,
+                    pointRadius: history.length > 30 ? 0 : 3,
+                    tension: 0.25,
+                    spanGaps: false,
+                };
+            });
+
+            if (!chart) {
+                chart = new Chart(canvas, {
+                    type: 'line',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 400 },
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { labels: { color: '#dfe6e9', boxWidth: 12 } },
+                            tooltip: { callbacks: { label: c => `${c.dataset.label}: $${c.parsed.y}` } },
+                        },
+                        scales: {
+                            x: { ticks: { color: '#b2bec3', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                            y: { ticks: { color: '#b2bec3', callback: val => '$' + val }, grid: { color: 'rgba(255,255,255,0.08)' } },
+                        },
+                    },
+                });
+            } else {
+                chart.data.labels = labels;
+                chart.data.datasets = datasets;
+                chart.update();
+            }
+        }
+
+        // Load Chart.js after the page is up, so the game never waits on it
+        function loadChartLibrary() {
+            chartStatus = 'loading';
+            renderChart();
+            const script = document.createElement('script');
+            script.src = CHART_URL;
+            script.onload = () => { chartStatus = 'ready'; renderChart(); };
+            script.onerror = () => {
+                chartStatus = 'failed';
+                renderChart();
+                toast("The chip chart couldn't load. Check your internet connection.", 'error', 5000);
+            };
+            document.head.appendChild(script);
+        }
+
+        document.getElementById('show-bots').addEventListener('change', renderChart);
+
+        /* =========================================================
+           SETTINGS INPUTS
+           ========================================================= */
+        function applySettingsToInputs() {
+            document.getElementById('player-name').value = settings.playerName;
+            document.getElementById('bot-speed').value = String(settings.botSpeed);
+        }
+
+        document.getElementById('player-name').addEventListener('change', e => {
+            const name = e.target.value.trim().slice(0, 12);
+            e.target.value = name;
+            settings.playerName = name;
+            updateUI();
+            renderChart();
+            if (saveGame()) toast(name ? `Name saved: ${name}` : 'Name cleared.', 'success');
+        });
+
+        document.getElementById('bot-speed').addEventListener('change', e => {
+            settings.botSpeed = Number(e.target.value);
+            const label = e.target.options[e.target.selectedIndex].text;
+            if (saveGame()) toast(`Bot speed set to ${label}.`, 'success');
+        });
+
+        /* =========================================================
+           STARTUP
+           ========================================================= */
+        function init() {
+            const restored = loadGame();
+            if (!restored) {
+                // First visit (or unreadable save): you + two bots
+                players = [{ name: 'You', isBot: false, chips: START_CHIPS }];
+                ['Alice', 'Bob'].forEach(n => players.push({ name: 'Bot ' + n, isBot: true, chips: START_CHIPS }));
+                stats = freshStats();
+                history = [];
+                recordHistory();
+                saveGame();
+            }
+
+            applySettingsToInputs();
+            showEmptyLog();
+            renderSeats();
+            updateUI();
+            setControls(false);
+            updateOdds();
+            renderStats();
+            loadChartLibrary();
+
+            if (restored) {
+                toast(`Welcome back! Your game was restored after ${stats.handsPlayed} hand${stats.handsPlayed === 1 ? '' : 's'}.`, 'success', 4500);
+                log(`<b>Game restored.</b> You have $${players[0].chips}.`);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
